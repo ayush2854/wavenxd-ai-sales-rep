@@ -1,0 +1,141 @@
+{
+  "company": {
+    "name": "WaveNxD Technologies Pvt. Ltd.",
+    "location": "Kolhapur",
+    "what_they_make": "No-pressure ultrasonic spray nozzle systems",
+    "industries": ["medical", "pharmaceutical", "energy", "electronics", "semiconductor"],
+    "technology_summary": "Ultrasonic nozzles produce a soft, low-velocity spray of fine droplets without pressure."
+  },
+  "nozzles": [
+    {
+      "id": "std_60khz",
+      "name": "Standard nozzle, 60 kHz",
+      "shapes": ["torch", "conical", "flat"],
+      "frequency_khz": 60,
+      "droplet_size_um": 40,
+      "feed_rate_ml_min": 5,
+      "feed_rate_is_max": false,
+      "viscosity_max_cp": 50,
+      "applications": ["lab spray dryer", "spray pyrolysis"]
+    },
+    {
+      "id": "std_120khz",
+      "name": "Standard nozzle, 120 kHz",
+      "shapes": ["torch", "conical", "flat", "dual-feed flat oval"],
+      "frequency_khz": 120,
+      "droplet_size_um": 25,
+      "feed_rate_ml_min": 3,
+      "feed_rate_is_max": false,
+      "viscosity_max_cp": 50,
+      "applications": ["lab spray dryer", "spray pyrolysis", "powder synthesis", "hydrogen production"]
+    },
+    {
+      "id": "std_torch_180khz",
+      "name": "Standard torch nozzle, 180 kHz",
+      "shapes": ["torch"],
+      "frequency_khz": 180,
+      "droplet_size_um": 10,
+      "feed_rate_ml_min": 5,
+      "feed_rate_is_max": false,
+      "viscosity_max_cp": 50,
+      "applications": ["stent coatings"],
+      "internal_note": "Catalog row is labelled 60KHz; treat as 180 kHz per its heading. Do not mention the label error to clients."
+    },
+    {
+      "id": "hv_conical_60khz",
+      "name": "High-viscosity conical nozzle, 60 kHz",
+      "shapes": ["conical"],
+      "frequency_khz": 60,
+      "droplet_size_um": 40,
+      "feed_rate_ml_min": 3,
+      "feed_rate_is_max": true,
+      "viscosity_max_cp": 1000,
+      "applications": ["fuel cell coating"]
+    },
+    {
+      "id": "hv_conical_24khz",
+      "name": "High-viscosity conical nozzle, 24 kHz",
+      "shapes": ["conical"],
+      "frequency_khz": 24,
+      "droplet_size_um": 60,
+      "feed_rate_ml_min": 3,
+      "feed_rate_is_max": true,
+      "viscosity_max_cp": 1000,
+      "applications": ["fuel cell coating"]
+    },
+    {
+      "id": "high_flow_conical_60khz",
+      "name": "High-flow conical nozzle, 60 kHz",
+      "shapes": ["conical"],
+      "frequency_khz": 60,
+      "droplet_size_um": 40,
+      "feed_rate_ml_min": 200,
+      "feed_rate_is_max": true,
+      "viscosity_max_cp": 50,
+      "applications": ["industrial spray dryer"]
+    },
+    {
+      "id": "pipac_conical_60khz",
+      "name": "PIPAC conical nozzle, 60 kHz",
+      "shapes": ["conical"],
+      "frequency_khz": 60,
+      "droplet_size_um": 40,
+      "feed_rate_ml_min": 20,
+      "feed_rate_is_max": false,
+      "viscosity_max_cp": 50,
+      "viscosity_note": "Listed as 50 cP (no '<' sign in the table)",
+      "applications": ["PIPAC chemotherapy"]
+    },
+    {
+      "id": "ext_horn_15mm_conical_60khz",
+      "name": "Extended horn nozzle, 15 mm (conical), 60 kHz",
+      "shapes": ["conical"],
+      "horn_length_mm": 15,
+      "frequency_khz": 60,
+      "droplet_size_um": 40,
+      "feed_rate_ml_min": 5,
+      "feed_rate_is_max": false,
+      "viscosity_max_cp": 50,
+      "applications": ["blood collection tubes", "coating"]
+    },
+    {
+      "id": "ext_horn_25mm_torch_60khz",
+      "name": "Extended horn nozzle, 25 mm (torch), 60 kHz",
+      "shapes": ["torch"],
+      "horn_length_mm": 25,
+      "frequency_khz": 60,
+      "droplet_size_um": 40,
+      "feed_rate_ml_min": 5,
+      "feed_rate_is_max": false,
+      "viscosity_max_cp": 1000,
+      "applications": ["syringe coating", "high viscosity"]
+    }
+  ],
+  "accessories_and_systems": [
+    {
+      "id": "air_shaping",
+      "name": "Air-shaping attachments",
+      "details": "Focused or wide spray patterns"
+    },
+    {
+      "id": "micro_dispensing",
+      "name": "Micro fluid dispensing system",
+      "details": "0 to 200 microlitre metered dispensing",
+      "applications": ["blood collection tube", "syringe", "stent", "balloon", "catheter coating"]
+    },
+    {
+      "id": "xy_spray_pyrolysis",
+      "name": "PLC-controlled XY spray pyrolysis system",
+      "details": "Substrate heating up to 450 deg C; SS316 enclosure",
+      "applications": ["micro coating", "transparent conductive coating"]
+    }
+  ],
+  "not_in_catalog": [
+    "price or quotation amounts",
+    "delivery or lead time",
+    "model numbers",
+    "power consumption, dimensions, materials, warranty, certifications",
+    "any specification not listed above"
+  ],
+  "fallback_reply_rule": "If a client asks for anything under not_in_catalog, say the WaveNxD team will confirm it, and offer to include the question in the quotation request."
+}
