@@ -1,4 +1,5 @@
 """Chat with the assistant in the terminal.  Run from the backend folder:  python cli.py"""
+import logging
 import os
 import sys
 
@@ -7,6 +8,8 @@ from dotenv import load_dotenv
 from app.agent import SalesAgent
 
 load_dotenv()
+logging.basicConfig(format="  [%(name)s] %(message)s")
+logging.getLogger("wavenxd").setLevel(logging.INFO)  # shows tool calls while you test
 
 
 def main() -> None:

@@ -1,6 +1,7 @@
 """FastAPI app. Run from the backend folder:  uvicorn app.main:app --reload"""
 from __future__ import annotations
 
+import logging
 import os
 import uuid
 from functools import lru_cache
@@ -14,6 +15,8 @@ from .agent import SalesAgent
 from .prompts import ASSISTANT_NAME
 
 load_dotenv()
+logging.basicConfig(format="[%(name)s] %(message)s")
+logging.getLogger("wavenxd").setLevel(logging.INFO)
 
 app = FastAPI(title="WaveNxD AI Sales Representative")
 

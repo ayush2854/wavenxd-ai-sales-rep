@@ -50,6 +50,10 @@ def recommend_nozzle(
         A dictionary with status ("match", "no_match" or "needs_more_info"), the best
         nozzle with reasons and warnings, alternatives, and any systems to consider.
     """
+    log.info(
+        "Tool call recommend_nozzle(application=%r, viscosity_cp=%s, flow_ml_min=%s, droplet_size_um=%s)",
+        application, viscosity_cp, flow_ml_min, droplet_size_um,
+    )
     return recommend(
         application=application,
         viscosity_cp=viscosity_cp,
