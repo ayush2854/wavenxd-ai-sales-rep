@@ -30,6 +30,7 @@ def test_prompt_covers_language_rule_and_closing_steps():
     assert "Marathi" in prompt and "Hindi" in prompt and "Tamil" in prompt
     assert "follow-up call" in prompt
     assert "recommend_nozzle" in prompt
+    assert "submit_quotation_request" in prompt
 
 
 def test_prompt_declines_off_topic_and_forbids_nagging():

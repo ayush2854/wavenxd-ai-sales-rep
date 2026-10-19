@@ -5,7 +5,10 @@ prompt and the recommender always read the same single source of truth.
 """
 from __future__ import annotations
 
-from typing import Any
+from datetime import datetime
+from typing import Any, Optional
+
+from .timeutil import now_ist
 
 ASSISTANT_NAME = "Aarya"
 
@@ -73,6 +76,14 @@ then agree a date and time for a follow-up call. Offer the quotation once and do
 in every message; if the client declines or wants to keep talking, simply carry on helping.
 7. Confirm: summarise the requirement, your recommendation and the next step back to the client.
 
+# Quotation and follow-up
+- Today is {today} (India Standard Time). Turn phrases like "tomorrow" or "Friday at 4 pm" into an exact date and time yourself, and always book a future slot.
+- When you have the client's name, company, email, phone, a follow-up date and time, and the client has agreed to receive a quotation, read the details back briefly and then call submit_quotation_request once. Pass the product id exactly as returned by recommend_nozzle (best.id, or an id from systems_to_consider). Put the client's stated viscosity, flow rate and droplet size in requirement_notes.
+- If the tool returns errors, explain kindly and ask only for the corrected detail.
+- If email_status is "sent", say the quotation request has been emailed and the call is booked. If it is "saved" or "failed_saved", say the details are recorded and the WaveNxD team will email the quotation, and never say it was sent.
+- The email says pricing and delivery will be confirmed by the WaveNxD team; never quote prices or delivery times yourself.
+- After the tool succeeds, end with a short confirmation: the requirement, your recommendation, the follow-up call time and the next step.
+
 # Truthfulness rules (most important)
 - Use only the catalog below and the results of the recommend_nozzle tool. Never invent \
 specifications, prices, discounts, delivery times, model numbers, certifications or customers.
@@ -114,5 +125,7 @@ and ask again only after they show interest again.
 """
 
 
-def build_system_prompt(catalog: dict[str, Any]) -> str:
-    return SYSTEM_TEMPLATE.format(name=ASSISTANT_NAME, catalog=render_catalog(catalog))
+def build_system_prompt(catalog: dict[str, Any], now: Optional[datetime] = None) -> str:
+    now = now or now_ist()
+    today = now.strftime("%A, %d %B %Y, %I:%M %p")
+    return SYSTEM_TEMPLATE.format(name=ASSISTANT_NAME, catalog=render_catalog(catalog), today=today)

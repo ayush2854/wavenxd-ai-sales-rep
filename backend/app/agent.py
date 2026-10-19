@@ -14,6 +14,7 @@ from typing import Any, Optional
 from google import genai
 from google.genai import types
 
+from . import quotation
 from .prompts import build_system_prompt
 from .recommender import load_catalog, recommend
 
@@ -62,17 +63,67 @@ def recommend_nozzle(
     )
 
 
+def submit_quotation_request(
+    name: str,
+    company: str,
+    email: str,
+    phone: str,
+    application: str,
+    recommended_product_id: str,
+    followup_date: str,
+    followup_time: str,
+    requirement_notes: str = "",
+) -> dict[str, Any]:
+    """Record the client's quotation request, email them a summary and book the follow-up call.
+
+    Call this only once, after the client has agreed to a quotation and you know all of:
+    name, company, email, phone, and an agreed future date and time for the follow-up call.
+
+    Args:
+        name: The client's full name.
+        company: The client's company or institution.
+        email: The client's email address.
+        phone: The client's phone number.
+        application: What the client wants to spray or coat, in English.
+        recommended_product_id: The id of the recommended product exactly as returned by
+            recommend_nozzle (best.id, or an id from systems_to_consider).
+        followup_date: The agreed call date as YYYY-MM-DD (India time).
+        followup_time: The agreed call time as HH:MM in 24-hour format (India time).
+        requirement_notes: The viscosity, flow rate, droplet size and any other needs the
+            client stated, in one short line.
+
+    Returns:
+        A dictionary with status "ok" or "error". On "ok" it includes email_status
+        ("sent", "saved" or "failed_saved"), followup_call and a summary. On "error" it
+        lists what to fix.
+    """
+    log.info(
+        "Tool call submit_quotation_request(company=%r, product=%s, when=%s %s)",
+        company, recommended_product_id, followup_date, followup_time,
+    )
+    return quotation.submit_quotation_request(
+        name=name,
+        company=company,
+        email=email,
+        phone=phone,
+        application=application,
+        recommended_product_id=recommended_product_id,
+        followup_date=followup_date,
+        followup_time=followup_time,
+        requirement_notes=requirement_notes,
+    )
+
+
 class SalesAgent:
     def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None, client: Any = None):
         self.model = model or os.getenv("GEMINI_MODEL", DEFAULT_MODEL)
         self.client = client or genai.Client(api_key=api_key or os.getenv("GEMINI_API_KEY"))
-        self.system_prompt = build_system_prompt(load_catalog())
         self._sessions: dict[str, Any] = {}
 
     def _config(self) -> types.GenerateContentConfig:
         return types.GenerateContentConfig(
-            system_instruction=self.system_prompt,
-            tools=[recommend_nozzle],  # the SDK runs the function automatically
+            system_instruction=build_system_prompt(load_catalog()),  # rebuilt so it carries today's date
+            tools=[recommend_nozzle, submit_quotation_request],  # the SDK runs these automatically
             temperature=0.4,
         )
 
