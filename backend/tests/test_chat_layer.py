@@ -32,6 +32,13 @@ def test_prompt_covers_language_rule_and_closing_steps():
     assert "recommend_nozzle" in prompt
 
 
+def test_prompt_declines_off_topic_and_forbids_nagging():
+    prompt = build_system_prompt(load_catalog())
+    assert "Do not tell jokes" in prompt
+    assert "Never nag" in prompt
+    assert "designed for" in prompt  # listed as a phrase to avoid
+
+
 # ---------- tool wrapper ----------
 def test_tool_wrapper_matches_recommender():
     result = recommend_nozzle("stent coating", viscosity_cp=10, flow_ml_min=3, droplet_size_um=10)
@@ -90,7 +97,7 @@ def test_agent_retries_then_succeeds():
 
 
 def test_agent_returns_friendly_fallback_after_repeated_failures():
-    client = FakeClient([RuntimeError("x"), RuntimeError("y"), RuntimeError("z")])
+    client = FakeClient([RuntimeError("w"), RuntimeError("x"), RuntimeError("y"), RuntimeError("z")])
     agent = SalesAgent(client=client)
     assert agent.reply("a", "hi") == FALLBACK_REPLY
 

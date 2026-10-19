@@ -89,7 +89,7 @@ class SalesAgent:
     def reply(self, session_id: str, message: str) -> str:
         chat = self._chat(session_id)
         last_error: Optional[Exception] = None
-        for attempt in range(3):
+        for attempt in range(4):
             try:
                 response = chat.send_message(message)
                 text = (response.text or "").strip()
@@ -99,6 +99,6 @@ class SalesAgent:
             except Exception as exc:  # network, quota, safety block, etc.
                 last_error = exc
                 log.warning("Gemini call failed (attempt %d): %s", attempt + 1, exc)
-            time.sleep(1.5 * (attempt + 1))
+            time.sleep(2 ** attempt)  # 1s, 2s, 4s, 8s
         log.error("Giving up after retries: %s", last_error)
         return FALLBACK_REPLY
