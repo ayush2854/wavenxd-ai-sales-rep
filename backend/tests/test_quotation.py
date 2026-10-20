@@ -6,7 +6,6 @@ from email import policy
 import pytest
 
 from app import emailer, leads, quotation
-from app.agent import submit_quotation_request as tool_wrapper
 from app.prompts import build_system_prompt
 from app.recommender import load_catalog
 from app.timeutil import IST
@@ -150,13 +149,8 @@ def test_smtp_failure_is_reported_honestly_and_email_is_saved(smtp, isolated):
 
 
 # ---------- wiring ----------
-def test_tool_wrapper_reaches_the_quotation_logic():
-    result = tool_wrapper(**{**GOOD, "followup_date": "2030-01-15"})
-    assert result["status"] == "ok"
-
-
-def test_prompt_carries_todays_date_and_the_quotation_rules():
+def test_prompt_carries_todays_date_and_the_honesty_rules():
     prompt = build_system_prompt(load_catalog(), now=NOW)
     assert "Tuesday, 20 October 2026" in prompt
-    assert "submit_quotation_request" in prompt
+    assert "QUOTATION RESULT" in prompt
     assert "never say it was sent" in prompt

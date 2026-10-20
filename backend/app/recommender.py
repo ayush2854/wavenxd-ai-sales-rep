@@ -270,3 +270,6 @@ def recommend(
         "missing_info": missing,
         "warnings": warnings,
     }
+
+
+keyword_tokens = _tokens  # public alias used by state.py
