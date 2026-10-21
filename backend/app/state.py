@@ -66,6 +66,7 @@ class ConversationState:
     submitted_signature: Optional[tuple] = None
     quote_result: Optional[dict[str, Any]] = None
     submitted_history: list[str] = field(default_factory=list)  # one line per completed request
+    previous_contact: Optional[str] = None  # set while a NEW contact's details are being collected
 
     # ---------- updating ----------
     def merge(self, extracted: dict[str, Any], message: Optional[str] = None) -> None:
@@ -126,6 +127,8 @@ class ConversationState:
             self.start_new_contact()
 
     def start_new_contact(self) -> None:
+        if self.name:
+            self.previous_contact = f"{self.name} ({self.company})" if self.company else self.name
         self.name = self.company = self.email = self.phone = None
         self.followup_date = self.followup_time = None
         self.quote_result = None

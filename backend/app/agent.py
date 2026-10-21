@@ -224,12 +224,23 @@ class SalesAgent:
         else:
             step = ["follow-up call date and time"]
 
-        note = (
+        note = ""
+        if state.previous_contact:
+            note += (
+                f"This is a NEW contact. The previous contact ({state.previous_contact}) no longer applies: "
+                "do not address the client by that name or reuse their details. The requirement and the "
+                "recommendation stay the same as before, so do not ask about the application, viscosity or "
+                "flow rate again. "
+            )
+        note += (
             "The client wants a quotation. Still needed: " + ", ".join(missing) + ". "
             "NEXT STEP: in this reply ask ONLY for: " + " and ".join(step) + ". "
         )
         if step == ["follow-up call date and time"]:
-            note += "Offer two or three concrete future slots (for example tomorrow at 11:00 AM or 4:00 PM IST). "
+            note += (
+                "Propose two or three concrete future slots (for example tomorrow at 11:00 AM or 4:00 PM IST); "
+                "propose them, do not claim they are available. "
+            )
         if state.followup_date and state.followup_time and step != ["follow-up call date and time"]:
             note += (
                 f"The client already suggested {state.followup_date} at {state.followup_time} IST: acknowledge it "
@@ -279,6 +290,7 @@ class SalesAgent:
         if result["status"] == "ok":
             state.submitted_signature, state.quote_result = signature, result
             state.wants_quotation = None  # consumed: another request needs the client to ask again
+            state.previous_contact = None
             state.submitted_history.append(
                 f"{state.name} ({state.company}), {result['summary']['recommended_product']}, "
                 f"call {result['followup_call']}, email_status {result['email_status']}"

@@ -527,3 +527,48 @@ def test_new_contact_flag_is_ignored_when_nothing_was_submitted_yet():
     s = ConversationState()
     s.merge({"name": "Test User", "email": "a@example.com", "new_contact": True})
     assert s.email == "a@example.com"
+
+
+# ---------- new contact: the previous person's name must not leak, and nothing is asked twice ----------
+def test_new_contact_note_names_the_previous_contact_and_keeps_the_requirement():
+    agent, models = make_agent([STENT, CONTACT, {"new_contact": True}])
+    agent.reply("s", STENT_MSG)
+    agent.reply("s", "yes please quote, details")
+    agent.reply("s", "do the same for another client")
+    system = models.replies()[2][2]
+    assert "This is a NEW contact" in system
+    assert "Test Client (Test Labs Pvt Ltd)" in system
+    assert "do not address the client by that name" in system
+    assert "do not ask about the application, viscosity or flow rate again" in system
+    assert "ask ONLY for: name and company" in system
+
+
+def test_previous_contact_note_is_cleared_after_the_new_request_is_submitted():
+    agent, models = make_agent(
+        [STENT, CONTACT, {"name": "User 3", "company": "Test company 3"}, {"email": "u3@example.com", "phone": "7744558877"},
+         {"followup_date": "2030-01-16", "followup_time": "11:00"}, {}]
+    )
+    for text in (STENT_MSG, "yes please quote, details", "do the same for user 3 from test company 3",
+                 "u3@example.com 7744558877", "tomorrow 11 am", "thanks"):
+        agent.reply("s", text)
+    assert len(leads.list_leads()) == 2
+    assert agent._sessions["s"].state.previous_contact is None
+    assert "This is a NEW contact" not in models.replies()[5][2]
+
+
+def test_extraction_prompt_has_examples_and_the_already_shared_rule():
+    now = datetime(2026, 10, 21, 11, 0, tzinfo=IST)
+    contents, _ = extraction_request([], "do the same for user 3 from test company 3", now)
+    prompt = contents[0].parts[0].text
+    assert "I have already shared it" in prompt
+    assert '"new_contact": true, "name": "Priya"' in prompt
+    assert "{{" not in prompt and "}}" not in prompt  # braces were un-escaped correctly
+
+
+def test_state_remembers_who_the_previous_contact_was():
+    s = ConversationState()
+    s.merge({**CONTACT})
+    s.submitted_history.append("done")
+    s.start_new_contact()
+    assert s.previous_contact == "Test Client (Test Labs Pvt Ltd)"
+    assert s.name is None and s.wants_quotation is True
