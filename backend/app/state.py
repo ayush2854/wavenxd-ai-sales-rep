@@ -65,6 +65,7 @@ class ConversationState:
     last_recommendation_key: Optional[tuple] = None
     submitted_signature: Optional[tuple] = None
     quote_result: Optional[dict[str, Any]] = None
+    submitted_history: list[str] = field(default_factory=list)  # one line per completed request
 
     # ---------- updating ----------
     def merge(self, extracted: dict[str, Any], message: Optional[str] = None) -> None:
@@ -73,6 +74,8 @@ class ConversationState:
         message is the client's latest message. Numbers are accepted only if it contains a digit,
         which blocks a model slip that re-reports an old number on a message like "yes".
         """
+        self._maybe_start_new_contact(extracted)
+
         new_application = _text(extracted.get("application"))
         if new_application:
             if self.application and _different_application(self.application, new_application):
@@ -107,9 +110,36 @@ class ConversationState:
         if isinstance(unknown, list):
             self.client_does_not_know |= {u for u in unknown if u in UNKNOWN_KEYS}
 
+    def _maybe_start_new_contact(self, extracted: dict[str, Any]) -> None:
+        """After a request was submitted, a different person or company means a NEW request.
+
+        Without this, the previous person's email, phone and call time would be reused for the new
+        person and several wrong quotation emails would go out.
+        """
+        if not self.submitted_history:
+            return
+        new_name, new_company = _text(extracted.get("name")), _text(extracted.get("company"))
+        identity_changed = bool(new_name and self.name and new_name.lower() != self.name.lower()) or bool(
+            new_company and self.company and new_company.lower() != self.company.lower()
+        )
+        if extracted.get("new_contact") is True or identity_changed:
+            self.start_new_contact()
+
+    def start_new_contact(self) -> None:
+        self.name = self.company = self.email = self.phone = None
+        self.followup_date = self.followup_time = None
+        self.quote_result = None
+        self.submitted_signature = None
+        self.wants_quotation = True  # asking for another contact's quotation is asking for a quotation
+
     # ---------- questions the controller asks ----------
     def requirement_ready(self) -> bool:
-        return bool(self.application) and bool(self.viscosity_cp or self.flow_ml_min)
+        if not self.application:
+            return False
+        if self.viscosity_cp or self.flow_ml_min:
+            return True
+        # the client does not know either number: recommend from the application alone
+        return {"viscosity_cp", "flow_ml_min"} <= self.client_does_not_know
 
     def requirement_key(self) -> tuple:
         return ((self.application or "").lower(), self.viscosity_cp, self.flow_ml_min, self.droplet_size_um)
@@ -134,6 +164,13 @@ class ConversationState:
         if not (self.followup_date and self.followup_time):
             missing.append("follow-up call date and time")
         return missing
+
+    def contact_signature(self) -> tuple:
+        return (self.name, self.company, self.email, self.phone, self.followup_date, self.followup_time)
+
+    def contact_changed(self) -> bool:
+        """True when the contact details or call time no longer match the submitted request."""
+        return self.submitted_signature is not None and self.contact_signature() != self.submitted_signature[:6]
 
     def requirement_notes(self) -> str:
         parts = []

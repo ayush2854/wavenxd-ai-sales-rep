@@ -30,6 +30,7 @@ EXTRACTION_SCHEMA = types.Schema(
         "flow_ml_min": _field(types.Type.NUMBER, "Flow rate in ml/min."),
         "droplet_size_um": _field(types.Type.NUMBER, "Droplet size in micrometres."),
         "wants_quotation": _field(types.Type.BOOLEAN, "True only if the client clearly agreed to receive a quotation; false if declined."),
+        "new_contact": _field(types.Type.BOOLEAN, "True only if the latest message says this quotation or call is for a DIFFERENT person, company or contact than the one already given."),
         "name": _field(types.Type.STRING, "Client's name as written."),
         "company": _field(types.Type.STRING, "Client's company as written."),
         "email": _field(types.Type.STRING, "Client's email as written."),
@@ -69,6 +70,8 @@ not change it, use null.
 If the client gives a range, use the largest value.
 - wants_quotation: true only if the client clearly agreed to receive a quotation (for example "yes, send \
 me a quotation") or gave contact details for one; false if they declined; otherwise null.
+- new_contact: true only if the latest message says the quotation or call is for a different person, \
+company or contact than the one already known (for example "do the same for another client"); otherwise null.
 - name, company, email, phone: exactly as the client wrote them.
 - followup_date as YYYY-MM-DD and followup_time as HH:MM (24-hour) once the client has chosen a call time. \
 Resolve words like "tomorrow" or "Friday" using today's date. If only a date or only a time is known, give what is known.

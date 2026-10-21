@@ -35,18 +35,19 @@ DEFAULT_MODEL = "gemini-3-flash-preview"  # override with GEMINI_MODEL in .env
 MAX_SESSIONS = 200
 MAX_HISTORY_MESSAGES = 40
 PRIVATE_FIELDS = {"name", "company", "email", "phone"}
-# Claims that something has already been scheduled, booked, recorded or emailed. If the model says this
-# before the controller has really submitted the quotation, the reply is rewritten.
+
+# Claims that something has been scheduled, booked, recorded or emailed. If the model says this while
+# the controller has not just submitted a request, the reply is rewritten.
 OVERCLAIM = re.compile(
     r"(?:\b(?:have|has|had|is|are|was|were|been)|'ve)\s+(?:been\s+)?(?:\w+ly\s+)?"
-    r"(?:scheduled|booked|emailed|sent|recorded|confirmed)\b"
-    r"|\b(?:scheduled|booked)\s+your\b",
+    r"(?:(?:re)?scheduled|(?:re)?booked|emailed|sent|recorded|confirmed|updated)\b"
+    r"|\b(?:re)?(?:scheduled|booked)\s+your\b",
     re.IGNORECASE,
 )
 CORRECTION = (
-    "\n\nCORRECTION: your previous draft said that something was scheduled, booked, recorded or emailed. "
-    "Nothing of that has happened yet. Rewrite the reply without any such claim and follow the NEXT STEP in "
-    "the live context."
+    "\n\nCORRECTION: your previous draft said that something was scheduled, booked, recorded, changed or "
+    "emailed. Nothing of that has happened in this turn. Rewrite the reply without any such claim and "
+    "follow the NEXT STEP or the notes in the live context."
 )
 FALLBACK_REPLY = (
     "I'm sorry, I ran into a technical problem just now. Could you please repeat that? "
@@ -135,6 +136,12 @@ class SalesAgent:
         return None
 
     # ---------- the controller ----------
+    @staticmethod
+    def _discovery_hint(state: ConversationState) -> str:
+        if not state.application:
+            return "Ask first about the application (and the industry)."
+        return "Ask first for the liquid viscosity and the required flow rate."
+
     def _decide(self, state: ConversationState, history: Optional[list[tuple[str, str]]] = None) -> list[str]:
         """Run what must run in code and return the live-context notes for the reply."""
         history = history or []
@@ -170,7 +177,8 @@ class SalesAgent:
             state.last_recommendation_key = None
             notes.append(
                 "The recommender has NOT run yet because the application and at least one of viscosity "
-                "or flow rate are still missing. Do not recommend a specific product yet."
+                "or flow rate are still missing. Do not recommend or name a specific product yet. "
+                + self._discovery_hint(state)
             )
 
         missing = state.missing_discovery()
@@ -185,10 +193,24 @@ class SalesAgent:
             notes.append("The client declined a quotation for now. Do not push it; keep helping.")
         elif state.wants_quotation:
             notes.extend(self._decide_quotation(state))
+        elif state.quote_result and state.contact_changed():
+            notes.append(
+                "The client's contact details or call time now differ from the request that was already "
+                "submitted. You cannot change a submitted request yourself. Say the WaveNxD team will confirm "
+                "any change during the follow-up call, or ask whether they want a new quotation request for "
+                "the new details. Do not say that anything was changed."
+            )
         elif state.recommendation and any("quotation" in text.lower() for role, text in history if role == "model"):
             notes.append(
                 "You have already offered a quotation earlier in this conversation. Do not offer it again "
                 "or ask for contact details unless the client asks for it; just answer their question."
+            )
+
+        if state.submitted_history:
+            notes.append(
+                "Quotation requests already submitted in this conversation (completed, real): "
+                + " | ".join(state.submitted_history)
+                + ". Never claim that any other request was submitted, booked or emailed."
             )
         return notes
 
@@ -207,9 +229,7 @@ class SalesAgent:
             "NEXT STEP: in this reply ask ONLY for: " + " and ".join(step) + ". "
         )
         if step == ["follow-up call date and time"]:
-            note += (
-                "Offer two or three concrete future slots (for example tomorrow at 11:00 AM or 4:00 PM IST). "
-            )
+            note += "Offer two or three concrete future slots (for example tomorrow at 11:00 AM or 4:00 PM IST). "
         if state.followup_date and state.followup_time and step != ["follow-up call date and time"]:
             note += (
                 f"The client already suggested {state.followup_date} at {state.followup_time} IST: acknowledge it "
@@ -233,15 +253,12 @@ class SalesAgent:
         if missing:
             return [self._contact_note(state, missing)]
 
-        signature = (
-            state.name, state.company, state.email, state.phone,
-            state.followup_date, state.followup_time, product_id,
-        )
+        signature = (*state.contact_signature(), product_id)
         if signature == state.submitted_signature and state.quote_result:
             return [
-                "The quotation request was already submitted and the call booked: "
+                "This exact quotation request was already submitted and the call booked: "
                 + json.dumps(state.quote_result, ensure_ascii=False)
-                + " Do not submit it again."
+                + " Tell the client it is already done; do not submit it again."
             ]
 
         result = quotation.submit_quotation_request(
@@ -261,6 +278,11 @@ class SalesAgent:
         )
         if result["status"] == "ok":
             state.submitted_signature, state.quote_result = signature, result
+            state.wants_quotation = None  # consumed: another request needs the client to ask again
+            state.submitted_history.append(
+                f"{state.name} ({state.company}), {result['summary']['recommended_product']}, "
+                f"call {result['followup_call']}, email_status {result['email_status']}"
+            )
             return ["QUOTATION RESULT (just completed, report it honestly): " + json.dumps(result, ensure_ascii=False)]
 
         errors = result["errors"]
@@ -283,16 +305,18 @@ class SalesAgent:
     # ---------- one conversation turn ----------
     def reply(self, session_id: str, message: str) -> str:
         session = self._session(session_id)
+        state = session.state
         now = now_ist()
 
         # 1. extract (a failure here only means "no new facts this turn")
-        contents, config = extraction_request(session.history, message, now, session.state.known_lines())
+        contents, config = extraction_request(session.history, message, now, state.known_lines())
         extracted = parse_extraction(self._generate(contents, config, self.extract_models))
         log.info("Extracted: %s", _loggable(extracted))
-        session.state.merge(extracted, message)
+        state.merge(extracted, message)
 
         # 2. decide in code
-        notes = self._decide(session.state, session.history)
+        notes = self._decide(state, session.history)
+        submitted_now = any(n.startswith("QUOTATION RESULT (just completed") for n in notes)
 
         # 3. reply
         system = (
@@ -307,8 +331,10 @@ class SalesAgent:
             log.error("Giving up: no reply from any model")
             return FALLBACK_REPLY
 
-        # Honesty guard: nothing has been submitted yet, so the reply must not claim it was.
-        if session.state.quote_result is None and OVERCLAIM.search(reply):
+        # Honesty guard: if a request is still pending (or the client wants a change the system cannot make),
+        # the reply must not claim that something was scheduled, recorded or emailed.
+        pending = state.quote_result is None or bool(state.missing_contact()) or state.contact_changed()
+        if not submitted_now and pending and OVERCLAIM.search(reply):
             log.warning("Reply claimed an action that has not happened; rewriting it")
             fixed = self._generate(
                 contents,

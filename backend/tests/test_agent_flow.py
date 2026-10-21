@@ -402,3 +402,128 @@ def test_http_timeout_is_applied_to_the_gemini_client(monkeypatch):
     monkeypatch.setenv("GEMINI_TIMEOUT_SECONDS", "12")
     SalesAgent(api_key="x")
     assert captured["timeout"] == 12000
+
+
+# ---------- a second client in the same chat must not cause duplicate or wrong emails ----------
+def outbox_count(tmp_path):
+    return len(list((tmp_path / "outbox").glob("*.eml")))
+
+
+def test_a_second_contact_gets_exactly_one_request_after_all_details_are_given(tmp_path):
+    agent, models = make_agent(
+        [
+            STENT,
+            CONTACT,
+            {"name": "User 3", "company": "Test company 3"},       # "do the same for user 3, details different"
+            {"email": "user3@example.com"},
+            {"phone": "7744558877"},
+            {"followup_date": "2030-01-16", "followup_time": "19:00"},
+        ]
+    )
+    agent.reply("s", STENT_MSG)
+    agent.reply("s", "yes please quote, details")
+    assert len(leads.list_leads()) == 1
+
+    agent.reply("s", "do the same for user 3 from test company 3, his contact details are different")
+    assert len(leads.list_leads()) == 1  # the old email, phone and time must NOT be reused
+    assert "ask ONLY for: email and phone" in models.replies()[2][2]
+
+    agent.reply("s", "user3@example.com")
+    assert len(leads.list_leads()) == 1
+    assert "ask ONLY for: phone" in models.replies()[3][2]
+
+    agent.reply("s", "7744558877")
+    assert len(leads.list_leads()) == 1
+    assert "ask ONLY for: follow-up call date and time" in models.replies()[4][2]
+
+    agent.reply("s", "tomorrow 7 pm")
+    rows = leads.list_leads()
+    assert len(rows) == 2 and outbox_count(tmp_path) == 2
+    assert rows[1]["name"] == "User 3" and rows[1]["email"] == "user3@example.com"
+    assert "QUOTATION RESULT (just completed" in models.replies()[5][2]
+
+
+def test_new_contact_flag_clears_the_old_contact_details():
+    agent, models = make_agent([STENT, CONTACT, {"new_contact": True}])
+    agent.reply("s", STENT_MSG)
+    agent.reply("s", "yes please quote, details")
+    agent.reply("s", "do the same for another client")
+    assert "ask ONLY for: name and company" in models.replies()[2][2]
+    assert len(leads.list_leads()) == 1
+
+
+def test_a_different_product_after_a_submission_does_not_send_an_unrequested_email():
+    agent, models = make_agent(
+        [STENT, CONTACT, {"application": "fuel cell coating", "viscosity_cp": 500, "flow_ml_min": 2}]
+    )
+    agent.reply("s", STENT_MSG)
+    agent.reply("s", "yes please quote, details")
+    agent.reply("s", "now fuel cell coating, 500 cP at 2 ml/min")
+    assert len(leads.list_leads()) == 1
+    third = models.replies()[2][2]
+    assert "NEW RECOMMENDER RESULT" in third and "hv_conical" in third
+    assert "QUOTATION RESULT (just completed" not in third
+
+
+def test_changing_the_call_time_after_submission_is_not_claimed_as_done():
+    replies = ["Reply one.", "Reply two.", "I have rescheduled your call to 5 pm.", "The WaveNxD team can confirm a change on the call."]
+    agent, models = make_agent([STENT, CONTACT, {"followup_time": "17:00"}], reply_text=replies)
+    agent.reply("s", STENT_MSG)
+    agent.reply("s", "yes please quote, details")
+    final = agent.reply("s", "make the call 5 pm instead")
+    assert len(leads.list_leads()) == 1
+    assert "You cannot change a submitted request yourself" in models.replies()[2][2]
+    assert final == "The WaveNxD team can confirm a change on the call."  # the false claim was rewritten
+
+
+def test_completed_requests_are_remembered_for_later_turns():
+    agent, models = make_agent([STENT, CONTACT, {}])
+    for text in (STENT_MSG, "yes please quote, details", "thanks"):
+        agent.reply("s", text)
+    third = models.replies()[2][2]
+    assert "already submitted in this conversation" in third
+    assert "Test Labs Pvt Ltd" in third
+    assert "Never claim that any other request was submitted" in third
+
+
+def test_correcting_a_name_before_any_submission_keeps_the_other_details():
+    agent, _ = make_agent([STENT, {"wants_quotation": True, "name": "Test Usr", "email": "a@example.com"}, {"name": "Test User"}])
+    agent.reply("s", STENT_MSG)
+    agent.reply("s", "quote, I am Test Usr, a@example.com")
+    agent.reply("s", "sorry, my name is Test User")
+    state = agent._sessions["s"].state
+    assert state.name == "Test User" and state.email == "a@example.com"
+
+
+def test_discovery_hint_asks_for_viscosity_and_flow_once_the_application_is_known():
+    agent, models = make_agent([{"application": "fuel cell coating"}])
+    agent.reply("s", "मला इंधन सेल कोटिंगसाठी नोझल हवा आहे")
+    system = models.replies()[0][2]
+    assert "Do not recommend or name a specific product yet" in system
+    assert "Ask first for the liquid viscosity and the required flow rate" in system
+
+
+def test_recommender_runs_from_the_application_alone_if_the_client_knows_neither_number():
+    agent, models = make_agent(
+        [{"application": "stent coating", "client_does_not_know": ["viscosity_cp", "flow_ml_min"]}]
+    )
+    agent.reply("s", "stent coating, I do not know the viscosity or flow rate")
+    assert "NEW RECOMMENDER RESULT" in models.replies()[0][2]
+
+
+# ---------- state-level behaviour ----------
+def test_state_identity_change_after_a_submission_starts_a_new_contact():
+    s = ConversationState()
+    s.merge({**CONTACT})
+    s.submitted_history.append("done")
+    s.quote_result, s.submitted_signature = {"status": "ok"}, (*s.contact_signature(), "std_torch_180khz")
+    s.merge({"name": "Someone Else"})
+    assert s.name == "Someone Else"
+    assert s.email is None and s.phone is None and s.followup_date is None
+    assert s.quote_result is None and s.wants_quotation is True
+
+
+def test_new_contact_flag_is_ignored_when_nothing_was_submitted_yet():
+    s = ConversationState()
+    s.merge({"name": "Test User", "email": "a@example.com", "new_contact": True})
+    assert s.email == "a@example.com"
