@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any, Optional
@@ -34,6 +35,19 @@ DEFAULT_MODEL = "gemini-3-flash-preview"  # override with GEMINI_MODEL in .env
 MAX_SESSIONS = 200
 MAX_HISTORY_MESSAGES = 40
 PRIVATE_FIELDS = {"name", "company", "email", "phone"}
+# Claims that something has already been scheduled, booked, recorded or emailed. If the model says this
+# before the controller has really submitted the quotation, the reply is rewritten.
+OVERCLAIM = re.compile(
+    r"(?:\b(?:have|has|had|is|are|was|were|been)|'ve)\s+(?:been\s+)?(?:\w+ly\s+)?"
+    r"(?:scheduled|booked|emailed|sent|recorded|confirmed)\b"
+    r"|\b(?:scheduled|booked)\s+your\b",
+    re.IGNORECASE,
+)
+CORRECTION = (
+    "\n\nCORRECTION: your previous draft said that something was scheduled, booked, recorded or emailed. "
+    "Nothing of that has happened yet. Rewrite the reply without any such claim and follow the NEXT STEP in "
+    "the live context."
+)
 FALLBACK_REPLY = (
     "I'm sorry, I ran into a technical problem just now. Could you please repeat that? "
     "If it keeps happening, the WaveNxD team will be happy to help you directly."
@@ -78,7 +92,11 @@ class SalesAgent:
         extractor = extract_model or os.getenv("GEMINI_EXTRACT_MODEL", "") or primary
         self.models = [m for m in dict.fromkeys([primary, backup]) if m]
         self.extract_models = [m for m in dict.fromkeys([extractor, backup]) if m]
-        self.client = client or genai.Client(api_key=api_key or os.getenv("GEMINI_API_KEY"))
+        timeout_ms = int(float(os.getenv("GEMINI_TIMEOUT_SECONDS", "30")) * 1000)  # fail fast on a hung connection
+        self.client = client or genai.Client(
+            api_key=api_key or os.getenv("GEMINI_API_KEY"),
+            http_options=types.HttpOptions(timeout=timeout_ms),
+        )
         self._sessions: dict[str, Session] = {}
 
     # ---------- sessions ----------
@@ -174,6 +192,36 @@ class SalesAgent:
             )
         return notes
 
+    @staticmethod
+    def _contact_note(state: ConversationState, missing: list[str]) -> str:
+        """Tell the model exactly what to ask next, and what it must not claim yet."""
+        if "name" in missing or "company" in missing:
+            step = [m for m in ("name", "company") if m in missing]
+        elif "email" in missing or "phone" in missing:
+            step = [m for m in ("email", "phone") if m in missing]
+        else:
+            step = ["follow-up call date and time"]
+
+        note = (
+            "The client wants a quotation. Still needed: " + ", ".join(missing) + ". "
+            "NEXT STEP: in this reply ask ONLY for: " + " and ".join(step) + ". "
+        )
+        if step == ["follow-up call date and time"]:
+            note += (
+                "Offer two or three concrete future slots (for example tomorrow at 11:00 AM or 4:00 PM IST). "
+            )
+        if state.followup_date and state.followup_time and step != ["follow-up call date and time"]:
+            note += (
+                f"The client already suggested {state.followup_date} at {state.followup_time} IST: acknowledge it "
+                "as their preferred time and say it will be confirmed once the remaining details are received. "
+            )
+        note += (
+            "Nothing has been emailed or booked yet. Do NOT say that the call is scheduled or booked, that "
+            "details are recorded, or that a quotation has been or will be emailed in this reply; the system "
+            "confirms those only when everything is complete."
+        )
+        return note
+
     def _decide_quotation(self, state: ConversationState) -> list[str]:
         product_id = _product_id(state.recommendation)
         if not product_id:
@@ -183,12 +231,7 @@ class SalesAgent:
             ]
         missing = state.missing_contact()
         if missing:
-            return [
-                "The client wants a quotation. Still needed: " + ", ".join(missing) + ". Ask for at most "
-                "the next two items, in this order: name and company; email and phone; follow-up call date "
-                "and time. If they have not picked a call time, offer two or three concrete future slots "
-                "(for example tomorrow at 11:00 AM or 4:00 PM IST). Nothing has been emailed or booked yet."
-            ]
+            return [self._contact_note(state, missing)]
 
         signature = (
             state.name, state.company, state.email, state.phone,
@@ -263,6 +306,18 @@ class SalesAgent:
         if reply is None:
             log.error("Giving up: no reply from any model")
             return FALLBACK_REPLY
+
+        # Honesty guard: nothing has been submitted yet, so the reply must not claim it was.
+        if session.state.quote_result is None and OVERCLAIM.search(reply):
+            log.warning("Reply claimed an action that has not happened; rewriting it")
+            fixed = self._generate(
+                contents,
+                types.GenerateContentConfig(system_instruction=system + CORRECTION, temperature=0.2),
+            )
+            if not fixed or OVERCLAIM.search(fixed):
+                log.error("Could not get an honest rewrite; using the safe fallback")
+                return FALLBACK_REPLY
+            reply = fixed
 
         session.history += [("user", message), ("model", reply)]
         return reply

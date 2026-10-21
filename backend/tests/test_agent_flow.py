@@ -10,7 +10,7 @@ import pytest
 
 from app import agent as agent_module
 from app import leads
-from app.agent import FALLBACK_REPLY, SalesAgent
+from app.agent import FALLBACK_REPLY, OVERCLAIM, SalesAgent
 from app.extractor import extraction_request, parse_extraction
 from app.state import ConversationState
 from app.timeutil import IST
@@ -45,7 +45,8 @@ class FakeModels:
             if isinstance(item, Exception):
                 raise item
             return SimpleNamespace(text=item if isinstance(item, str) else json.dumps(item))
-        return SimpleNamespace(text=self.reply_text)
+        text = self.reply_text.pop(0) if isinstance(self.reply_text, list) else self.reply_text
+        return SimpleNamespace(text=text)
 
     def replies(self):
         return [c for c in self.calls if c[1] == "reply"]
@@ -316,3 +317,88 @@ def test_reset_forgets_the_conversation():
     agent.reset("a")
     agent.reply("a", "hello again")
     assert "has NOT run yet" in models.replies()[1][2]
+
+
+# ---------- honesty: nothing may be claimed before the controller has really submitted ----------
+def test_next_step_asks_only_for_the_missing_phone_and_forbids_claims():
+    partial = {"wants_quotation": True, "name": "Test User", "company": "Test company",
+               "email": "test.user@example.com", "followup_date": "2030-01-15", "followup_time": "14:00"}
+    agent, models = make_agent([STENT, partial])
+    agent.reply("s", STENT_MSG)
+    agent.reply("s", "details, call day after tomorrow at 2 pm")
+    system = models.replies()[1][2]
+    assert "ask ONLY for: phone" in system
+    assert "already suggested 2030-01-15 at 14:00" in system
+    assert "Do NOT say that the call is scheduled" in system
+    assert leads.list_leads() == []
+
+
+def test_next_step_order_is_name_company_then_contact_then_time():
+    agent, models = make_agent([STENT, {"wants_quotation": True}])
+    agent.reply("s", STENT_MSG)
+    agent.reply("s", "yes quote")
+    assert "ask ONLY for: name and company" in models.replies()[1][2]
+
+
+def test_false_booking_claim_is_rewritten_before_it_reaches_the_client():
+    partial = {"wants_quotation": True, "name": "Test User", "company": "Test company",
+               "email": "test.user@example.com", "followup_date": "2030-01-15", "followup_time": "14:00"}
+    replies = ["Reply one.", "We have scheduled your follow-up call.", "Could you share your phone number?"]
+    agent, models = make_agent([STENT, partial], reply_text=replies)
+    agent.reply("s", STENT_MSG)
+    final = agent.reply("s", "day after tomorrow at 2 pm")
+    assert final == "Could you share your phone number?"
+    assert "CORRECTION" in models.replies()[2][2]
+    assert agent._sessions["s"].history[-1] == ("model", "Could you share your phone number?")
+
+
+def test_persistent_false_claim_falls_back_to_the_safe_message():
+    partial = {"wants_quotation": True, "name": "Test User", "company": "Test company",
+               "email": "test.user@example.com", "followup_date": "2030-01-15", "followup_time": "14:00"}
+    replies = ["Reply one.", "We have scheduled your call.", "Your call is booked and emailed. It has been sent."]
+    agent, _ = make_agent([STENT, partial], reply_text=replies)
+    agent.reply("s", STENT_MSG)
+    assert agent.reply("s", "2 pm") == FALLBACK_REPLY
+
+
+def test_a_true_confirmation_after_a_real_submission_is_not_touched():
+    agent, models = make_agent(
+        [STENT, CONTACT], reply_text=["Reply one.", "Your quotation has been successfully emailed."]
+    )
+    agent.reply("s", STENT_MSG)
+    assert agent.reply("s", "details") == "Your quotation has been successfully emailed."
+    assert len(models.replies()) == 2  # no rewrite
+
+
+@pytest.mark.parametrize("text", [
+    "We have scheduled your follow-up call for 22 October.",
+    "Your quotation has been successfully emailed to you.",
+    "I've booked the call.",
+    "Our team has recorded these details.",
+    "The call is confirmed.",
+])
+def test_overclaim_pattern_catches_completion_claims(text):
+    assert OVERCLAIM.search(text)
+
+
+@pytest.mark.parametrize("text", [
+    "Could you share your phone number?",
+    "We can schedule a call tomorrow at 11:00 AM or 4:00 PM IST.",
+    "I will need your email address before the quotation can be sent.",
+    "The WaveNxD team will confirm the price.",
+])
+def test_overclaim_pattern_leaves_normal_questions_alone(text):
+    assert not OVERCLAIM.search(text)
+
+
+def test_http_timeout_is_applied_to_the_gemini_client(monkeypatch):
+    captured = {}
+
+    class FakeClient:
+        def __init__(self, api_key=None, http_options=None):
+            captured["timeout"] = http_options.timeout
+
+    monkeypatch.setattr(agent_module.genai, "Client", FakeClient)
+    monkeypatch.setenv("GEMINI_TIMEOUT_SECONDS", "12")
+    SalesAgent(api_key="x")
+    assert captured["timeout"] == 12000
