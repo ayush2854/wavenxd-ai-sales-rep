@@ -72,3 +72,30 @@ def test_chat_keeps_the_given_session_id(client):
 def test_chat_rejects_empty_message(client):
     assert client.post("/chat", json={"message": ""}).status_code == 422
     assert client.post("/chat", json={"message": "   "}).status_code == 400
+
+
+# ---------- built UI is served by the backend ----------
+def test_built_frontend_is_served_and_the_api_still_works(tmp_path):
+    from fastapi import FastAPI
+
+    from app.main import mount_frontend
+
+    (tmp_path / "index.html").write_text("<html>hello ui</html>", encoding="utf-8")
+    other = FastAPI()
+
+    @other.get("/health")
+    def health():
+        return {"status": "ok"}
+
+    assert mount_frontend(other, tmp_path) is True
+    c = TestClient(other)
+    assert "hello ui" in c.get("/").text
+    assert c.get("/health").json() == {"status": "ok"}  # API routes registered before the mount still win
+
+
+def test_frontend_is_not_mounted_when_it_has_not_been_built(tmp_path):
+    from fastapi import FastAPI
+
+    from app.main import mount_frontend
+
+    assert mount_frontend(FastAPI(), tmp_path) is False

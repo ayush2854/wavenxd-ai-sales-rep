@@ -5,10 +5,12 @@ import logging
 import os
 import uuid
 from functools import lru_cache
+from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .agent import SalesAgent
@@ -64,3 +66,18 @@ def chat(req: ChatRequest, agent: SalesAgent = Depends(get_agent)) -> ChatRespon
 def reset(session_id: str, agent: SalesAgent = Depends(get_agent)) -> dict[str, str]:
     agent.reset(session_id)
     return {"status": "reset"}
+
+
+# ---------- serve the built React UI, so one command runs the whole product ----------
+FRONTEND_DIST = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
+
+
+def mount_frontend(target: FastAPI, dist: Path = FRONTEND_DIST) -> bool:
+    """Serve frontend/dist at "/" if it has been built (npm run build). Must be registered last."""
+    if (dist / "index.html").exists():
+        target.mount("/", StaticFiles(directory=dist, html=True), name="frontend")
+        return True
+    return False
+
+
+mount_frontend(app)
