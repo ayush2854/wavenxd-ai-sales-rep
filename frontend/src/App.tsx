@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import { newSessionId, resetSession, sendMessage } from "./api";
+import { LANGUAGES, listen, speak, speechInputSupported, speechOutputSupported, stopSpeaking } from "./speech";
+import type { Listener } from "./speech";
 
 type Role = "user" | "assistant";
 
@@ -33,21 +35,48 @@ export default function App() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
+  // voice (optional: shown only when the browser supports it)
+  const [listening, setListening] = useState(false);
+  const [speaking, setSpeaking] = useState(false);
+  const [micLang, setMicLang] = useState("en-IN");
+  const [voiceReplies, setVoiceReplies] = useState(false);
+  const [voiceNote, setVoiceNote] = useState("");
+  const listenerRef = useRef<Listener | null>(null);
+  const voiceRepliesRef = useRef(false);
+  const micLangRef = useRef("en-IN");
+  const sendRef = useRef<(text: string) => Promise<void>>(async () => undefined);
+  const canListen = speechInputSupported();
+  const canSpeak = speechOutputSupported();
+
+  useEffect(() => {
+    voiceRepliesRef.current = voiceReplies;
+    micLangRef.current = micLang;
+  }, [voiceReplies, micLang]);
+
   const add = useCallback((role: Role, text: string, error = false) => {
     setMessages((prev) => [...prev, { id: nextId.current++, role, text, error }]);
+  }, []);
+
+  const announce = useCallback((text: string) => {
+    if (!voiceRepliesRef.current) return;
+    const { voiceFound } = speak(text, micLangRef.current, () => setSpeaking(false));
+    setSpeaking(true);
+    setVoiceNote(voiceFound ? "" : "No installed voice was found for this language, so the browser default is used.");
   }, []);
 
   // The assistant speaks first: a hidden "Hello" makes it greet and introduce itself.
   const greet = useCallback(async () => {
     setLoading(true);
     try {
-      add("assistant", await sendMessage(sessionRef.current, "Hello"));
+      const reply = await sendMessage(sessionRef.current, "Hello");
+      add("assistant", reply);
+      announce(reply);
     } catch {
       add("assistant", GENERIC_ERROR, true);
     } finally {
       setLoading(false);
     }
-  }, [add]);
+  }, [add, announce]);
 
   useEffect(() => {
     if (started.current) return;
@@ -71,18 +100,60 @@ export default function App() {
       add("user", text);
       setLoading(true);
       try {
-        add("assistant", await sendMessage(sessionRef.current, text));
+        const reply = await sendMessage(sessionRef.current, text);
+        add("assistant", reply);
+        announce(reply);
       } catch {
         add("assistant", GENERIC_ERROR, true);
       } finally {
         setLoading(false);
       }
     },
-    [add, loading]
+    [add, announce, loading]
   );
+
+  useEffect(() => {
+    sendRef.current = send;
+  }, [send]);
+
+  useEffect(
+    () => () => {
+      listenerRef.current?.stop();
+      stopSpeaking();
+    },
+    []
+  );
+
+  const toggleMic = () => {
+    if (listening) {
+      listenerRef.current?.stop();
+      return;
+    }
+    stopSpeaking();
+    setSpeaking(false);
+    setVoiceNote("");
+    setListening(true);
+    listenerRef.current = listen(micLang, {
+      onInterim: (text) => setInput(text),
+      onFinal: (text) => {
+        setInput("");
+        void sendRef.current(text);
+      },
+      onEnd: () => setListening(false),
+      onError: (message) => setVoiceNote(message),
+    });
+  };
+
+  const stopVoice = () => {
+    stopSpeaking();
+    setSpeaking(false);
+  };
 
   const newConversation = useCallback(async () => {
     if (loading) return;
+    listenerRef.current?.stop();
+    stopVoice();
+    setVoiceNote("");
     await resetSession(sessionRef.current);
     sessionRef.current = newSessionId();
     setMessages([]);
@@ -153,6 +224,49 @@ export default function App() {
         )}
         <div ref={bottomRef} />
       </main>
+
+      {(canListen || canSpeak) && (
+        <div className="voicebar">
+          {canListen && (
+            <>
+              <select
+                value={micLang}
+                onChange={(e) => setMicLang(e.target.value)}
+                disabled={listening}
+                aria-label="Voice language"
+              >
+                {LANGUAGES.map((l) => (
+                  <option key={l.code} value={l.code}>
+                    {l.label}
+                  </option>
+                ))}
+              </select>
+              <button className={`mic${listening ? " on" : ""}`} onClick={toggleMic} disabled={loading}>
+                {listening ? "■ Stop" : "🎤 Speak"}
+              </button>
+            </>
+          )}
+          {canSpeak && (
+            <label className="toggle">
+              <input
+                type="checkbox"
+                checked={voiceReplies}
+                onChange={(e) => {
+                  setVoiceReplies(e.target.checked);
+                  if (!e.target.checked) stopVoice();
+                }}
+              />
+              Read replies aloud
+            </label>
+          )}
+          {speaking && (
+            <button className="linkbtn" onClick={stopVoice}>
+              Stop voice
+            </button>
+          )}
+          {voiceNote && <span className="voicenote">{voiceNote}</span>}
+        </div>
+      )}
 
       <footer className="composer">
         <textarea

@@ -19,7 +19,8 @@ Built for the NexaPrime Intern Evaluation Task (19 to 23 October 2026).
 | 6 | Product recommendation | Deterministic recommender scores catalog nozzles and explains why | `recommender.py` |
 | 7 | Quotation and follow-up | Collects name, company, email, phone, call time; stores the lead; emails a quotation request with a calendar invite (`.ics`) | `quotation.py`, `emailer.py`, `leads.py` |
 
-Bonus items included: a clean UI, real email sending (SMTP) and a calendar invite for the follow-up call.
+Bonus items included: a clean UI, real email sending (SMTP), a calendar invite for the follow-up call, and
+optional **voice input and spoken replies** in the browser (see below).
 
 ## How it works
 
@@ -141,6 +142,17 @@ backend/
 frontend/           React chat UI
 docs/               architecture, demo script, presentation notes
 ```
+
+## Voice (optional bonus)
+
+In Chrome or Edge the chat shows a voice bar: choose a language (English, Hindi, Marathi, Tamil), press
+**Speak**, talk, and the message is sent automatically. Tick **Read replies aloud** to hear the answers.
+It uses the browser's Web Speech API, so there is nothing to install, but:
+
+- voice input needs an internet connection and microphone permission;
+- spoken replies depend on the voices installed on the device (if a language has no voice, the UI says so
+  and the browser default is used);
+- the voice bar is hidden in browsers without speech support, and typing always works.
 
 ## Honesty and safety rules
 
